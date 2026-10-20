@@ -22,11 +22,164 @@ function closeDialog(){stopCamera();$('connectDialog').close()}
 function shutdown(){stopCamera();if(channel){try{channel.close()}catch(e){}channel=null}if(pc){pc.onconnectionstatechange=null;pc.close();pc=null}if(connectedId){let c=chats.find(x=>x.id===connectedId);if(c){c.lastDisconnected=stamp();persist(c)}}connectedId=null;state('Не подключено')}
 function newPeer(){shutdown();pc=new RTCPeerConnection({iceServers:[]});pc.onconnectionstatechange=()=>{if(!pc)return;let s=pc.connectionState;if(s==='connected')state('Подключено',true);else if(s==='disconnected')state('Переподключение...');else if(s==='failed'||s==='closed'){state('Связь потеряна');if(connectedId){let c=chats.find(x=>x.id===connectedId);if(c){c.lastDisconnected=stamp();persist(c)}}}};pc.ondatachannel=e=>attachChannel(e.channel);return pc}
 function attachChannel(ch){channel=ch;channel.onopen=async()=>{state('Подключено',true);closeDialog();if(!selected())newChat();connectedId=activeId;const c=selected();c.lastDisconnected=null;c.archived=false;await persist(c);render();ch.send(JSON.stringify({type:'hello',name:nick(),id:localStorage.getItem(STORE+'id')}))};ch.onclose=()=>{state('Связь потеряна');if(connectedId){let c=chats.find(x=>x.id===connectedId);if(c){c.lastDisconnected=stamp();persist(c)}}};ch.onmessage=async e=>{let d;try{d=JSON.parse(e.data)}catch{return}if(d.type==='hello'){let c=selected();if(!c)c=newChat(d.name,d.id);const policy=$('privacy').value;if(policy==='whitelist'&&c.peerId&&c.peerId!==d.id){alert('Идентификатор собеседника изменился. Соединение закрыто.');shutdown();return}if(policy==='whitelist'&&!c.peerId){alert('Для нового собеседника включён режим «только белый список». Сначала переключи режим и подтверди нового человека.');shutdown();return}if(c.peerId&&c.peerId!==d.id){if(!confirm('Внимание: идентификатор собеседника отличается от сохранённого. Продолжить?')){shutdown();return}}c.name=cleanText(d.name||c.name);c.peerId=d.id;c.archived=false;await persist(c);render()}else if(d.type==='message'){await addMessage(d.text,false)}}}
-function iceComplete(p){return new Promise((resolve,reject)=>{if(p.iceGatheringState==='complete')return resolve();const timer=setTimeout(()=>{p.removeEventListener('icegatheringstatechange',check);resolve()},12000);function check(){if(p.iceGatheringState==='complete'){clearTimeout(timer);p.removeEventListener('icegatheringstatechange',check);resolve()}}p.addEventListener('icegatheringstatechange',check)})}
+function iceComplete(p) {
+  return new Promise((resolve, reject) => {
+    if (p.iceGatheringState === 'complete') return resolve();
+
+    const timer = setTimeout(() => {
+      p.removeEventListener('icegatheringstatechange', check);
+      reject(Error('Не удалось собрать сетевые адреса за 15 секунд'));
+    }, 15000);
+
+    function check() {
+      if (p.iceGatheringState === 'complete') {
+        clearTimeout(timer);
+        p.removeEventListener('icegatheringstatechange', check);
+        resolve();
+      }
+    }
+
+    p.addEventListener('icegatheringstatechange', check);
+  });
+}
 function validateCandidates(p){const s=p.localDescription?.sdp||'';if(!s.includes('a=candidate:'))throw Error('Браузер не предоставил локальные сетевые адреса (ICE). Попробуй Chrome/Edge или другую Wi-Fi-сеть.');return s}
 function dialog(modeName){$('connectDialog').showModal();$('outCode').value='';$('inCode').value='';$('qrWrap').hidden=true;$('connectState').textContent='';mode=modeName;$('connectTitle').textContent=modeName==='create'?'Создать подключение':'Подключиться';$('connectHelp').textContent=modeName==='create'?'Покажи QR другу. Он создаст ответный код — вставь или отсканируй его здесь.':'Вставь или отсканируй QR-код создателя. Затем покажи ему ответный QR-код.';$('apply').textContent=modeName==='create'?'Принять ответ':'Создать ответ'}
-async function startCreate(){try{dialog('create');say('Создаём приглашение… Подожди до 12 секунд, пока браузер найдёт локальную сеть.');if(!window.RTCPeerConnection)throw Error('WebRTC не поддерживается этим браузером');const p=newPeer();attachChannel(p.createDataChannel('nimessage',{ordered:true}));offer=await p.createOffer();await p.setLocalDescription(offer);say('Собираем локальные адреса…');await iceComplete(p);offer=p.localDescription;validateCandidates(p);showCode({v:1,type:'offer',sdp:offer.sdp,name:nick(),id:localStorage.getItem(STORE+'id')})}catch(e){say('Ошибка: '+e.message)}}
-async function acceptCode(){try{const o=unpack($('inCode').value);if(mode==='create'){if(o.type!=='answer')throw Error('Нужен ответный код');if(!pc||!offer)throw Error('Сначала создай подключение');if(o.id&&selected()?.peerId&&selected().peerId!==o.id&&!confirm('Идентификатор собеседника изменился. Продолжить?'))return;{const old=chats.find(c=>c.peerId&&c.peerId===o.id);activeId=old?.id||newChat(o.name||'Собеседник',o.id).id;render()}await pc.setRemoteDescription({type:'answer',sdp:o.sdp});answer={type:'answer',sdp:o.sdp};say('Ответ принят. Ожидаем соединение. Проверь код безопасности на обоих устройствах.');await showVerify()}else{if(o.type!=='offer')throw Error('Нужен код приглашения');offer={type:'offer',sdp:o.sdp};let old=chats.find(c=>c.peerId&&c.peerId===o.id);if($('privacy').value==='whitelist'&&!old)throw Error('Собеседник не в белом списке');if(!confirm('Принять запрос подключения от «'+cleanText(o.name)+'»?'))return;activeId=old?.id||newChat(o.name||'Собеседник',o.id).id;render();const p=newPeer();await p.setRemoteDescription(offer);answer=await p.createAnswer();await p.setLocalDescription(answer);say('Собираем локальные адреса…');await iceComplete(p);answer=p.localDescription;validateCandidates(p);showCode({v:1,type:'answer',sdp:answer.sdp,name:nick(),id:localStorage.getItem(STORE+'id')});await showVerify()}}catch(e){say('Ошибка: '+e.message)}}
+async function startCreate() {
+  try {
+    dialog('create');
+
+    const p = newPeer();
+
+    attachChannel(
+      p.createDataChannel('airchat', { ordered: true })
+    );
+
+    offer = await p.createOffer();
+    await p.setLocalDescription(offer);
+
+    say('Собираем локальные адреса…');
+
+    await iceComplete(p);
+
+    offer = p.localDescription;
+
+    showCode({
+      v: 1,
+      type: 'offer',
+      sdp: offer.sdp,
+      name: nick(),
+      id: localStorage.getItem(STORE + 'id')
+    });
+
+  } catch (e) {
+    say('Ошибка: ' + e.message);
+  }
+}
+async function acceptCode() {
+  try {
+    const o = unpack($('inCode').value);
+
+    if (mode === 'create') {
+      if (o.type !== 'answer') {
+        throw Error('Нужен ответный код');
+      }
+
+      if (!pc || !offer) {
+        throw Error('Сначала создай подключение');
+      }
+
+      if (
+        o.id &&
+        selected()?.peerId &&
+        selected().peerId !== o.id &&
+        !confirm('Идентификатор собеседника изменился. Продолжить?')
+      ) {
+        return;
+      }
+
+      if (!selected()) {
+        newChat(o.name || 'Собеседник', o.id);
+      }
+
+      await pc.setRemoteDescription({
+        type: 'answer',
+        sdp: o.sdp
+      });
+
+      answer = {
+        type: 'answer',
+        sdp: o.sdp
+      };
+
+      say('Ответ принят. Ожидаем соединение. Проверь код безопасности на обоих устройствах.');
+
+      await showVerify();
+
+    } else {
+      if (o.type !== 'offer') {
+        throw Error('Нужен код приглашения');
+      }
+
+      offer = {
+        type: 'offer',
+        sdp: o.sdp
+      };
+
+      let old = chats.find(
+        c => c.peerId && c.peerId === o.id
+      );
+
+      if (
+        $('privacy').value === 'whitelist' &&
+        !old
+      ) {
+        throw Error('Собеседник не в белом списке');
+      }
+
+      if (
+        !confirm(
+          'Принять запрос подключения от «' +
+          cleanText(o.name) +
+          '»?'
+        )
+      ) {
+        return;
+      }
+
+      activeId = old?.id ||
+        newChat(o.name || 'Собеседник', o.id).id;
+
+      render();
+
+      const p = newPeer();
+
+      await p.setRemoteDescription(offer);
+
+      answer = await p.createAnswer();
+
+      await p.setLocalDescription(answer);
+
+      say('Собираем локальные адреса…');
+
+      await iceComplete(p);
+
+      answer = p.localDescription;
+
+      showCode({
+        v: 1,
+        type: 'answer',
+        sdp: answer.sdp,
+        name: nick(),
+        id: localStorage.getItem(STORE + 'id')
+      });
+
+      await showVerify();
+    }
+
+  } catch (e) {
+    say('Ошибка: ' + e.message);
+  }
+}
 async function showVerify(){if(!offer||!answer)return;let f=s=>[...s.matchAll(/a=fingerprint:[^\r\n]+/g)].map(x=>x[0]).join('|');let input=f(offer.sdp)+'|'+f(answer.sdp);const bytes=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(input));let a=new Uint8Array(bytes);let n=((a[0]<<16)|(a[1]<<8)|a[2])%1000000;let code=String(n).padStart(6,'0');say('Код проверки: '+code.slice(0,3)+'-'+code.slice(3)+'. Сверь его с кодом на другом устройстве. Если коды разные — отключись!')}
 async function getQRDecoder(){
   if(window.jsQR)return window.jsQR;
@@ -87,5 +240,24 @@ async function scanImage(file){
   }catch(e){say('Ошибка распознавания: '+e.message)}
   finally{$('qrImage').value=''}
 }
-async function boot(){if(!window.crypto?.randomUUID||!window.indexedDB||!window.RTCPeerConnection){alert('Этот браузер не поддерживает необходимые функции WebRTC / IndexedDB.');return}db=await openDB();chats=await loadChats();if(!localStorage.getItem(STORE+'id'))localStorage.setItem(STORE+'id',uid());$('nick').value=localStorage.getItem(STORE+'nick')||'';$('autoArchive').value=localStorage.getItem(STORE+'archive')||'30';$('privacy').value=localStorage.getItem(STORE+'privacy')||'approval';$('nick').oninput=()=>localStorage.setItem(STORE+'nick',$('nick').value);$('autoArchive').onchange=()=>{localStorage.setItem(STORE+'archive',$('autoArchive').value);archiveSweep()};$('privacy').onchange=()=>localStorage.setItem(STORE+'privacy',$('privacy').value);$('create').onclick=startCreate;$('newChat').onclick=startCreate;$('join').onclick=()=>dialog('join');$('apply').onclick=acceptCode;$('copyCode').onclick=async()=>{try{await navigator.clipboard.writeText($('outCode').value);say('Код скопирован')}catch{say('Выдели код и скопируй вручную')}};$('scan').onclick=scanQR;$('qrImage').onchange=e=>scanImage(e.target.files[0]);document.querySelectorAll('[data-close]').forEach(b=>b.onclick=()=>b.closest('dialog').close());$('connectDialog').addEventListener('close',stopCamera);$('settings').onclick=()=>$('settingsDialog').showModal();$('sendForm').onsubmit=async e=>{e.preventDefault();const msg=$('message').value.trim();if(!msg||channel?.readyState!=='open')return;channel.send(JSON.stringify({type:'message',text:msg}));$('message').value='';await addMessage(msg,true)};$('archive').onclick=async()=>{let c=selected();if(!c)return;c.archived=!c.archived;await persist(c);render()};$('export').onclick=()=>{let c=selected();if(!c)return alert('Сначала выбери чат');saveFile('nimessage-'+c.id+'.json',JSON.stringify(c,null,2))};$('delete').onclick=async()=>{let c=selected();if(!c)return;if(!confirm('Удалить локальную историю этого чата? На другом устройстве она останется.'))return;await removeChat(c.id);chats=chats.filter(x=>x.id!==c.id);activeId=null;render()};window.addEventListener('online',()=>{});window.addEventListener('pagehide',()=>{if(connectedId){let c=chats.find(x=>x.id===connectedId);if(c){c.lastDisconnected=stamp();persist(c)}}});await archiveSweep();render();if('serviceWorker' in navigator&&location.protocol==='https:')navigator.serviceWorker.register('./sw.js').catch(console.warn)}
+async function async function archiveSweep() {
+  const setting = document.getElementById('autoArchive');
+  if (!setting) return;
+  const minutes = Number(setting.value);
+  // Если автоархивирование отключено
+  if (!minutes || minutes <= 0) return;
+  const now = Date.now();
+  for (const chat of chats) {
+    if (
+      chat.lastDisconnected &&
+      !chat.archived &&
+      now - chat.lastDisconnected >= minutes * 60000
+    ) {
+      chat.archived = true;
+      await persist(chat);
+    }
+  }
+  render();
+}
+boot(){if(!window.crypto?.randomUUID||!window.indexedDB||!window.RTCPeerConnection){alert('Этот браузер не поддерживает необходимые функции WebRTC / IndexedDB.');return}db=await openDB();chats=await loadChats();if(!localStorage.getItem(STORE+'id'))localStorage.setItem(STORE+'id',uid());$('nick').value=localStorage.getItem(STORE+'nick')||'';$('autoArchive').value=localStorage.getItem(STORE+'archive')||'30';$('privacy').value=localStorage.getItem(STORE+'privacy')||'approval';$('nick').oninput=()=>localStorage.setItem(STORE+'nick',$('nick').value);$('autoArchive').onchange=()=>{localStorage.setItem(STORE+'archive',$('autoArchive').value);archiveSweep()};$('privacy').onchange=()=>localStorage.setItem(STORE+'privacy',$('privacy').value);$('create').onclick=startCreate;$('newChat').onclick=startCreate;$('join').onclick=()=>dialog('join');$('apply').onclick=acceptCode;$('copyCode').onclick=async()=>{try{await navigator.clipboard.writeText($('outCode').value);say('Код скопирован')}catch{say('Выдели код и скопируй вручную')}};$('scan').onclick=scanQR;$('qrImage').onchange=e=>scanImage(e.target.files[0]);document.querySelectorAll('[data-close]').forEach(b=>b.onclick=()=>b.closest('dialog').close());$('connectDialog').addEventListener('close',stopCamera);$('settings').onclick=()=>$('settingsDialog').showModal();$('sendForm').onsubmit=async e=>{e.preventDefault();const msg=$('message').value.trim();if(!msg||channel?.readyState!=='open')return;channel.send(JSON.stringify({type:'message',text:msg}));$('message').value='';await addMessage(msg,true)};$('archive').onclick=async()=>{let c=selected();if(!c)return;c.archived=!c.archived;await persist(c);render()};$('export').onclick=()=>{let c=selected();if(!c)return alert('Сначала выбери чат');saveFile('nimessage-'+c.id+'.json',JSON.stringify(c,null,2))};$('delete').onclick=async()=>{let c=selected();if(!c)return;if(!confirm('Удалить локальную историю этого чата? На другом устройстве она останется.'))return;await removeChat(c.id);chats=chats.filter(x=>x.id!==c.id);activeId=null;render()};window.addEventListener('online',()=>{});window.addEventListener('pagehide',()=>{if(connectedId){let c=chats.find(x=>x.id===connectedId);if(c){c.lastDisconnected=stamp();persist(c)}}});await archiveSweep();render();if('serviceWorker' in navigator&&location.protocol==='https:')navigator.serviceWorker.register('./sw.js').catch(console.warn)}
 boot().catch(e=>alert('Ошибка запуска niMessage: '+e.message));

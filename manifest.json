@@ -1,1 +1,0 @@
-{"name":"AirChat — Offline Messenger","short_name":"AirChat","description":"Локальный мессенджер с WebRTC","start_url":"./","scope":"./","display":"standalone","background_color":"#f5efe5","theme_color":"#f5efe5","icons":[{"src":"icons/icon.svg","sizes":"any","type":"image/svg+xml","purpose":"any maskable"}]}

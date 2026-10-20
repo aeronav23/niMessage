@@ -240,7 +240,25 @@ async function scanImage(file){
   }catch(e){say('Ошибка распознавания: '+e.message)}
   finally{$('qrImage').value=''}
 }
-async function async function archiveSweep() {
+function saveFile(filename, content) {
+  const blob = new Blob([content], {
+    type: 'application/json;charset=utf-8'
+  });
+
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+
+  a.href = url;
+  a.download = filename;
+
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+async function archiveSweep() {
   const setting = document.getElementById('autoArchive');
   if (!setting) return;
   const minutes = Number(setting.value);
@@ -259,5 +277,5 @@ async function async function archiveSweep() {
   }
   render();
 }
-boot(){if(!window.crypto?.randomUUID||!window.indexedDB||!window.RTCPeerConnection){alert('Этот браузер не поддерживает необходимые функции WebRTC / IndexedDB.');return}db=await openDB();chats=await loadChats();if(!localStorage.getItem(STORE+'id'))localStorage.setItem(STORE+'id',uid());$('nick').value=localStorage.getItem(STORE+'nick')||'';$('autoArchive').value=localStorage.getItem(STORE+'archive')||'30';$('privacy').value=localStorage.getItem(STORE+'privacy')||'approval';$('nick').oninput=()=>localStorage.setItem(STORE+'nick',$('nick').value);$('autoArchive').onchange=()=>{localStorage.setItem(STORE+'archive',$('autoArchive').value);archiveSweep()};$('privacy').onchange=()=>localStorage.setItem(STORE+'privacy',$('privacy').value);$('create').onclick=startCreate;$('newChat').onclick=startCreate;$('join').onclick=()=>dialog('join');$('apply').onclick=acceptCode;$('copyCode').onclick=async()=>{try{await navigator.clipboard.writeText($('outCode').value);say('Код скопирован')}catch{say('Выдели код и скопируй вручную')}};$('scan').onclick=scanQR;$('qrImage').onchange=e=>scanImage(e.target.files[0]);document.querySelectorAll('[data-close]').forEach(b=>b.onclick=()=>b.closest('dialog').close());$('connectDialog').addEventListener('close',stopCamera);$('settings').onclick=()=>$('settingsDialog').showModal();$('sendForm').onsubmit=async e=>{e.preventDefault();const msg=$('message').value.trim();if(!msg||channel?.readyState!=='open')return;channel.send(JSON.stringify({type:'message',text:msg}));$('message').value='';await addMessage(msg,true)};$('archive').onclick=async()=>{let c=selected();if(!c)return;c.archived=!c.archived;await persist(c);render()};$('export').onclick=()=>{let c=selected();if(!c)return alert('Сначала выбери чат');saveFile('nimessage-'+c.id+'.json',JSON.stringify(c,null,2))};$('delete').onclick=async()=>{let c=selected();if(!c)return;if(!confirm('Удалить локальную историю этого чата? На другом устройстве она останется.'))return;await removeChat(c.id);chats=chats.filter(x=>x.id!==c.id);activeId=null;render()};window.addEventListener('online',()=>{});window.addEventListener('pagehide',()=>{if(connectedId){let c=chats.find(x=>x.id===connectedId);if(c){c.lastDisconnected=stamp();persist(c)}}});await archiveSweep();render();if('serviceWorker' in navigator&&location.protocol==='https:')navigator.serviceWorker.register('./sw.js').catch(console.warn)}
+async function boot(){if(!window.crypto?.randomUUID||!window.indexedDB||!window.RTCPeerConnection){alert('Этот браузер не поддерживает необходимые функции WebRTC / IndexedDB.');return}db=await openDB();chats=await loadChats();if(!localStorage.getItem(STORE+'id'))localStorage.setItem(STORE+'id',uid());$('nick').value=localStorage.getItem(STORE+'nick')||'';$('autoArchive').value=localStorage.getItem(STORE+'archive')||'30';$('privacy').value=localStorage.getItem(STORE+'privacy')||'approval';$('nick').oninput=()=>localStorage.setItem(STORE+'nick',$('nick').value);$('autoArchive').onchange=()=>{localStorage.setItem(STORE+'archive',$('autoArchive').value);archiveSweep()};$('privacy').onchange=()=>localStorage.setItem(STORE+'privacy',$('privacy').value);$('create').onclick=startCreate;$('newChat').onclick=startCreate;$('join').onclick=()=>dialog('join');$('apply').onclick=acceptCode;$('copyCode').onclick=async()=>{try{await navigator.clipboard.writeText($('outCode').value);say('Код скопирован')}catch{say('Выдели код и скопируй вручную')}};$('scan').onclick=scanQR;$('qrImage').onchange=e=>scanImage(e.target.files[0]);document.querySelectorAll('[data-close]').forEach(b=>b.onclick=()=>b.closest('dialog').close());$('connectDialog').addEventListener('close',stopCamera);$('settings').onclick=()=>$('settingsDialog').showModal();$('sendForm').onsubmit=async e=>{e.preventDefault();const msg=$('message').value.trim();if(!msg||channel?.readyState!=='open')return;channel.send(JSON.stringify({type:'message',text:msg}));$('message').value='';await addMessage(msg,true)};$('archive').onclick=async()=>{let c=selected();if(!c)return;c.archived=!c.archived;await persist(c);render()};$('export').onclick=()=>{let c=selected();if(!c)return alert('Сначала выбери чат');saveFile('nimessage-'+c.id+'.json',JSON.stringify(c,null,2))};$('delete').onclick=async()=>{let c=selected();if(!c)return;if(!confirm('Удалить локальную историю этого чата? На другом устройстве она останется.'))return;await removeChat(c.id);chats=chats.filter(x=>x.id!==c.id);activeId=null;render()};window.addEventListener('online',()=>{});window.addEventListener('pagehide',()=>{if(connectedId){let c=chats.find(x=>x.id===connectedId);if(c){c.lastDisconnected=stamp();persist(c)}}});await archiveSweep();render();if('serviceWorker' in navigator&&location.protocol==='https:')navigator.serviceWorker.register('./sw.js').catch(console.warn)}
 boot().catch(e=>alert('Ошибка запуска niMessage: '+e.message));

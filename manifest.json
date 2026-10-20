@@ -1,0 +1,17 @@
+{
+  "name": "niMessage — No Internet Message",
+  "short_name": "niMessage",
+  "description": "Локальный P2P мессенджер без интернета",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#f5efe5",
+  "theme_color": "#f5efe5",
+  "icons": [
+    {
+      "src": "icons/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}

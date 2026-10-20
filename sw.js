@@ -1,1 +1,39 @@
-const CACHE='nimessage-v1-5-2';const ASSETS=['./','./index.html','./style.css?v=151','./app.js?v=151','./manifest.json','./vendor/pako.min.js','./vendor/qr.js','./icons/icon.svg'];self.addEventListener('install',e=>e.waitUntil(caches.open(CACHE).then(c=>c.addAll(ASSETS)).then(()=>self.skipWaiting())));self.addEventListener('activate',e=>e.waitUntil(caches.keys().then(keys=>Promise.all(keys.filter(k=>k!==CACHE).map(k=>caches.delete(k)))).then(()=>self.clients.claim())));self.addEventListener('fetch',e=>{if(e.request.method!=='GET')return;e.respondWith(caches.match(e.request).then(c=>c||fetch(e.request)))})
+/* niMessage 1.6: network-first app, offline fallback, QR decoder cached after first online load. */
+const CACHE='nimessage-v1-6-qr-1';
+const QR_LIB='https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js';
+const CORE=['./','./index.html','./style.css?v=160','./app.js?v=160','./manifest.json','./vendor/pako.min.js','./vendor/qr.js','./icons/icon.svg'];
+self.addEventListener('install',event=>event.waitUntil((async()=>{
+  const cache=await caches.open(CACHE);
+  await Promise.allSettled(CORE.map(async path=>{
+    const url=new URL(path,self.registration.scope);
+    const response=await fetch(url,{cache:'reload'});
+    if(response.ok)await cache.put(url,response);
+  }));
+  // CDN script is optional; when online, cache it for offline QR decoding.
+  try{const r=await fetch(QR_LIB,{mode:'no-cors',cache:'reload'});await cache.put(QR_LIB,r)}catch(e){}
+  await self.skipWaiting();
+})()));
+self.addEventListener('activate',event=>event.waitUntil((async()=>{
+  const keys=await caches.keys();
+  await Promise.all(keys.filter(k=>k!==CACHE&&(k.startsWith('nimessage-')||k.startsWith('airchat-'))).map(k=>caches.delete(k)));
+  await self.clients.claim();
+})()));
+self.addEventListener('fetch',event=>{
+  const req=event.request;if(req.method!=='GET')return;
+  const url=new URL(req.url);
+  const isQR=url.href===QR_LIB;
+  if(!isQR&&(url.origin!==self.location.origin||!url.href.startsWith(self.registration.scope)))return;
+  event.respondWith((async()=>{
+    const cache=await caches.open(CACHE);
+    try{
+      const response=await fetch(req,{cache:'no-store'});
+      if(response.ok||response.type==='opaque')await cache.put(req,response.clone());
+      return response;
+    }catch(e){
+      const cached=await cache.match(req,{ignoreSearch:!isQR});
+      if(cached)return cached;
+      if(req.mode==='navigate')return (await cache.match(new URL('./index.html',self.registration.scope)))||Response.error();
+      return Response.error();
+    }
+  })());
+});
